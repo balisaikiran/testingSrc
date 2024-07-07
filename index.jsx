@@ -20,10 +20,10 @@ const PROPERTY_STATE = {
 };
 export default function PropertyPage() {
   const location = useLocation();
-  const [cash, setCash] = useState(0);
-  const [currentLocation, setCurrentLocation] = useState({ lat: 0, lng: 0 });
   const { authFetch, token } = useAuth();
   const property = location.state.property;
+  const [cash, setCash] = useState(0);
+  const [currentLocation, setCurrentLocation] = useState({ lat: 0, lng: 0 });
   const [rentType, setRentType] = useState('Monthly');
   const [notes, setNotes] = useState('');
   const [expensesType, setExpensesType] = useState('Monthly');
@@ -36,6 +36,14 @@ export default function PropertyPage() {
   const [previousRent, setPreviousRent] = useState(property.income.monthly_rent_unit_1);
   const [view, setView] = useState("monthly"); // Default view is monthly
   const [expenses, setExpenses] = useState({ ...property.expenses });
+  const [offerPrice, setOfferPrice] = useState(property.offerPrice);
+  const [unitCount, setUnitCount] = useState(property.unitCount); // Add state for unit count
+  const [otherIncome, setOtherIncome] = useState(0); // Add state for other income
+  const [mortgageRate, setMortgageRate] = useState(property?.mortgage?.mortgage_rate || 0);
+  const [mortgageLength, setMortgageLength] = useState(property?.mortgage?.mortgage_length || 30);
+  const [mortgageAmount, setMortgageAmount] = useState(property?.mortgage?.mortgage_amount || 0);
+  const [monthlyPayment, setMonthlyPayment] = useState(property?.mortgage?.monthly_payment || 0);
+
 
   const handleViewChange = (newView) => {
     setView(newView);
@@ -52,22 +60,24 @@ export default function PropertyPage() {
     }));
   };
 
+  const handleOfferPriceChange = (e) => {
+    // Remove non-numeric characters and format as currency
+    const newOfferPrice = parseFloat(e.target.value.replace(/[^\d.]/g, '')) || 0;
+    setOfferPrice(newOfferPrice);
+  };
+
   const streetViewRef = useRef(null);
 
-
   useEffect(() => {
-    setNotes(property?.notes)
-    setCash(property?.cash)
+    setNotes(property?.notes);
+    setCash(property?.cash);
 
     if (property.isSaved)
-      setSavePropertyVar(PROPERTY_STATE.UN_SAVE)
+      setSavePropertyVar(PROPERTY_STATE.UN_SAVE);
     else
-      setSavePropertyVar(PROPERTY_STATE.SAVE_PROPERTY)
+      setSavePropertyVar(PROPERTY_STATE.SAVE_PROPERTY);
 
     if (property.latitude && property.longitude) {
-      console.log("Latitude:", property.latitude);
-      console.log("Longitude:", property.longitude);
-
       setCurrentLocation({
         lat: Number(property.latitude),
         lng: Number(property.longitude),
@@ -95,9 +105,12 @@ export default function PropertyPage() {
   const [totalAnnualRent, setTotalAnnualRent] = useState(0);
 
   useEffect(() => {
-  
     calculateTotals(income);
-  }, [income], );
+  }, [income, otherIncome]); // Add otherIncome to dependencies
+
+  useEffect(() => {
+    calculateTotals(income);
+  }, [rentType]); // Recalculate totals when rentType changes
 
   useEffect(() => {
     const totalMonthly = Object.keys(expenses).reduce((acc, key) => {
@@ -143,29 +156,85 @@ export default function PropertyPage() {
     expenses.water_and_sewer,
     expenses.other,
     expenses.vacancy_rate,
-    property.price
+    property.price,
   ]);
+
+  useEffect(() => {
+    calculateMonthlyPayment(mortgageRate, mortgageLength, mortgageAmount);
+  }, [mortgageRate, mortgageLength, mortgageAmount]);
+
+  // Function to calculate monthly mortgage payment
+  const calculateMonthlyPayment = (rate, length, amount) => {
+    const monthlyInterestRate = rate / 100 / 12;
+    const numberOfPayments = length * 12;
+    const numerator = monthlyInterestRate * Math.pow(1 + monthlyInterestRate, numberOfPayments);
+    const denominator = Math.pow(1 + monthlyInterestRate, numberOfPayments) - 1;
+    const monthlyPayment = amount * (numerator / denominator);
+    setMonthlyPayment(monthlyPayment || 0);
+    setExpenses((prevExpenses) => ({
+      ...prevExpenses,
+      mortgage: {
+        annual: monthlyPayment * 12,
+        monthly: monthlyPayment,
+      },
+    }));
+  };
+
+  const handleRateChange = (e) => {
+    const rate = parseFloat(e.target.value) || 0;
+    setMortgageRate(rate);
+  };
+
+  const handleLengthChange = (e) => {
+    const length = parseInt(e.target.value) || 0;
+    setMortgageLength(length);
+  };
+
+  const handleAmountChange = (e) => {
+    const amount = parseFloat(e.target.value.replace(/[^\d.]/g, '')) || 0;
+    setMortgageAmount(amount);
+  };
 
   const round = (value, decimals) => {
     return Number(Math.round(value + 'e' + decimals) + 'e-' + decimals);
   };
 
-
-
   const handleRentChange = (e, key) => {
     const updatedIncome = {
       ...income,
-      [key]: parseFloat(e.target.value.replace(/[^\d]/g, '')) || 0
+      [key]: parseFloat(e.target.value.replace(/[^\d]/g, '')) || 0,
     };
     setIncome(updatedIncome);
   };
 
+  const handleOtherIncomeChange = (e) => {
+    const value = parseFloat(e.target.value.replace(/[^\d]/g, '')) || 0;
+    setOtherIncome(value);
+  };
+
   const calculateTotals = (income) => {
-    const monthlyRentKeys = Object.keys(income).filter(key => key.startsWith('monthly_rent_unit_'));
-    const totalMonthly = monthlyRentKeys.reduce((acc, key) => acc + income[key], 0);
+    const monthlyRentKeys = Object.keys(income).filter((key) => key.startsWith('monthly_rent_unit_'));
+    const totalMonthly = monthlyRentKeys.reduce((acc, key) => acc + income[key], 0) + otherIncome;
     const totalAnnual = totalMonthly * 12;
     setTotalMonthlyRent(totalMonthly);
     setTotalAnnualRent(totalAnnual);
+  };
+
+  const handleUnitCountChange = (e) => {
+    const newUnitCount = parseInt(e.target.value) || 0;
+    setUnitCount(newUnitCount);
+
+    // Update income state to reflect new unit count
+    const updatedIncome = { ...income };
+    for (let i = 1; i <= newUnitCount; i++) {
+      if (!updatedIncome[`monthly_rent_unit_${i}`]) {
+        updatedIncome[`monthly_rent_unit_${i}`] = 0;
+      }
+    }
+    for (let i = newUnitCount + 1; i <= 10; i++) { // assuming max 10 units for simplicity
+      delete updatedIncome[`monthly_rent_unit_${i}`];
+    }
+    setIncome(updatedIncome);
   };
 
   const logout = async () => {
@@ -182,14 +251,11 @@ export default function PropertyPage() {
       if (response.detail === "Successfully logged out.") {
         localStorage.removeItem('token'); // example
         window.location.href = '/'; // redirect to /login
-
       }
     } catch (error) {
       console.error('Error Logging out:', error);
     }
-
-  }
-
+  };
 
   useEffect(() => {
     const initializeStreetView = () => {
@@ -219,11 +285,7 @@ export default function PropertyPage() {
 
   const handleRentTypeChange = useCallback((type) => {
     setRentType(type);
-  }, [rentType]);
-
-  const handleExensesTypeChange = useCallback((type) => {
-    setExpensesType(type);
-  }, [expensesType]);
+  }, []);
 
   const formatCurrency = (value) => {
     return `$${value.toLocaleString()}`;
@@ -234,6 +296,11 @@ export default function PropertyPage() {
     property.notes = notes
     property.isSaved = true
     property.isLiving = livingInCurrentUnit
+    property.income = income
+    property.unitCount = unitCount
+    property.expenses = expenses
+    property.income.other_income = otherIncome
+
 
     try {
       const response = await authFetch(
@@ -355,14 +422,10 @@ export default function PropertyPage() {
           <div className="flex md:flex-col justify-center items-start gap-[35px]">
             <div className="flex flex-col gap-[21px] flex-1">
               <div ref={streetViewRef} style={{ width: '100%', height: '400px' }} className="sm:w-full sm:h-auto z-[1] rounded-lg"></div>
-
-
               <div>
-
                 <div className="flex md:flex-col justify-center gap-[30px]">
                   <div className="flex flex-col w-full gap-[21px]">
                     <div className="flex flex-col gap-[11px] p-6 sm:p-5 border-gray-200 border border-solid bg-white-A700 rounded-[12px]">
-
                       <div>
                         <div className="flex justify-between items-center gap-5">
                           <Heading as="h1">Income</Heading>
@@ -388,7 +451,7 @@ export default function PropertyPage() {
                         </div>
                       </div>
                       <div className="flex flex-col gap-[7px]">
-                        {Object.keys(income).filter(key => key.startsWith('monthly_rent_unit_')).map((key, index) => (
+                        {Object.keys(income).filter((key) => key.startsWith('monthly_rent_unit_')).map((key, index) => (
                           <div key={index} className="flex justify-between w-[74%] md:w-full gap-5">
                             <Text as="p" className="!text-gray-700">
                               Rent {index + 1}:
@@ -413,9 +476,16 @@ export default function PropertyPage() {
                             Other income:
                           </Text>
                           <div className="flex justify-end border-blue-500 border border-dashed bg-white-A700 rounded">
-                            <Text as="p" className="mr-[3px] md:mr-0 text-right">
-                              0
-                            </Text>
+                            <input
+                              type="text"
+                              value={
+                                rentType === 'Monthly'
+                                  ? formatCurrency(otherIncome)
+                                  : formatCurrency(otherIncome * 12)
+                              }
+                              onChange={handleOtherIncomeChange}
+                              className="mr-[3px] md:mr-0 text-right p-1 outline-none bg-transparent"
+                            />
                           </div>
                         </div>
                       </div>
@@ -435,112 +505,116 @@ export default function PropertyPage() {
                       <div className="flex flex-col mt-[5px] mb-1">
                         <Heading as="h2">Mortgage</Heading>
                         <div className="h-px mt-[3px] bg-gray-100_01 rounded-[1px]" />
+
                         <div className="flex justify-between mt-[13px] gap-5">
                           <Text as="p" className="!text-gray-700">
-                            Rate
+                            Rate (%)
                           </Text>
                           <div className="flex justify-end border-blue-500 border border-dashed bg-white-A700 rounded">
-                            <Text as="p" className="mr-[3px] md:mr-0 text-right">
-
-                              {
-                                (property?.mortgage?.mortgage_rate || 0)
-
-                              }%
-                            </Text>
+                            <input
+                              type="number"
+                              value={mortgageRate}
+                              onChange={handleRateChange}
+                              className="text-right p-1 outline-none bg-transparent"
+                            />
                           </div>
                         </div>
+
                         <div className="flex justify-between mt-[7px] gap-5">
                           <Text as="p" className="self-end mt-[3px] !text-gray-700">
-                            Length
+                            Length (Years)
                           </Text>
                           <div className="flex self-start justify-center border-blue-500 border border-dashed bg-white-A700 rounded">
-                            <Text as="p" className="text-right">
-                              30 Years
-                            </Text>
+                            <input
+                              type="number"
+                              value={mortgageLength}
+                              onChange={handleLengthChange}
+                              className="text-right p-1 outline-none bg-transparent"
+                            />
                           </div>
                         </div>
+
                         <div className="flex justify-between mt-1.5 gap-5">
                           <Text as="p" className="self-end !text-gray-700">
                             Amount
                           </Text>
                           <Text as="p" className="self-start">
-                            {
-                              formatCurrency(property?.mortgage?.mortgage_amount || 0)
-
-                            }
+                            {formatCurrency(mortgageAmount)}
                           </Text>
                         </div>
+
                         <div className="flex justify-between mt-[3px] gap-5">
                           <Text as="p" className="self-end mt-[3px] !text-gray-700">
                             Monthly Payment
                           </Text>
                           <Text as="p" className="self-start">
-                            {
-                              formatCurrency(property?.mortgage?.monthly_payment || 0)
-                            }
+                            {formatCurrency(monthlyPayment)}
                           </Text>
                         </div>
                       </div>
                     </div>
                   </div>
                   <div className="flex flex-col w-full gap-[9px] p-[13px] border-gray-200 border border-solid bg-white-A700 rounded-[12px]">
-      <div className="mt-[11px]">
-        <div className="flex justify-between items-center gap-5">
-          <h3 className="self-end">Expenses</h3>
-          <div className="flex self-start justify-center mb-0.5 gap-1.5">
-            <p
-              onClick={() => handleViewChange("monthly")}
-              className={`px-2.5 py-[3px] !text-gray-700 text-center !font-medium border-gray-100_01 border border-solid rounded cursor-pointer ${
-                view === "monthly" ? "bg-blue-500 text-white" : ""
-              }`}
-            >
-              Monthly
-            </p>
-            <button
-              onClick={() => handleViewChange("annual")}
-              className={`font-medium border-blue-500 border border-solid min-w-[78px] rounded-full cursor-pointer ${
-                view === "annual" ? "bg-blue-500 text-white" : ""
-              }`}
-            >
-              Annual
-            </button>
-          </div>
-        </div>
-      </div>
-      <div>
-        {Object.keys(expenses).map(
-          (key) =>
-            key !== "total_expenses" &&
-            key !== "vacancy_loss" && (
-              <div key={key}>
-                <div className="flex justify-between mt-1 gap-5">
-                  <p className="!text-gray-700">{key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}:</p>
-                  <div className="flex justify-end border-blue-500 border border-dashed bg-white-A700 rounded">
-                    <input
-                      type="number"
-                      value={expenses[key][view]}
-                      onChange={(e) => handleInputChange(e, key)}
-                      className="mr-[3px] md:mr-0 text-right"
-                    />
-                  </div>
-                </div>
-                <div className="h-px mt-[3px] bg-gray-100_01 rounded-[1px]" />
-              </div>
-            )
-        )}
-        <div className="flex justify-between mt-1 gap-5">
-          <p className="self-end !text-gray-700">Vacancy Loss:</p>
-          <p className="self-start text-right">{formatCurrency(expenses.vacancy_loss[view] || 0)}</p>
-        </div>
-        <div className="flex justify-between mt-1 gap-5">
-          <p className="self-end !text-gray-700">Total Expenses:</p>
-          <p className="self-start text-right">
-            {formatCurrency(expenses.total_expenses[view] || 0)}
-          </p>
-        </div>
-      </div>
-    </div>
+                    <div className="mt-[11px]">
+                      <div className="flex justify-between items-center gap-5">
+                        <h3 className="self-end">Expenses</h3>
+                        <div className="flex self-start justify-center mb-0.5 gap-1.5">
+                          <p
+                            onClick={() => handleViewChange("monthly")}
+                            className={`px-2.5 py-[3px] !text-gray-700 text-center !font-medium border-gray-100_01 border border-solid rounded cursor-pointer ${view === "monthly" ? "bg-blue-500 text-white" : ""
+                              }`}
+                          >
+                            Monthly
+                          </p>
+                          <button
+                            onClick={() => handleViewChange("annual")}
+                            className={`font-medium border-blue-500 border border-solid min-w-[78px] rounded-full cursor-pointer ${view === "annual" ? "bg-blue-500 text-white" : ""
+                              }`}
+                          >
+                            Annual
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="flex justify-between mt-1 gap-5">
+                        <p className="self-end !text-gray-700">Mortgage :</p>
+                        <p className="self-start text-right">{formatCurrency(expenses.mortgage[view] || 0)}</p>
+                      </div>
+                      {Object.keys(expenses).map(
+                        (key) =>
+                          key !== "total_expenses" &&
+                          key !== "vacancy_loss" &&
+                          key !== "mortgage" && (
 
+                            <div key={key}>
+                              <div className="flex justify-between mt-1 gap-5">
+                                <p className="!text-gray-700">{key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}:</p>
+                                <div className="flex justify-end border-blue-500 border border-dashed bg-white-A700 rounded">
+                                  <input
+                                    type="number"
+                                    value={expenses[key][view]}
+                                    onChange={(e) => handleInputChange(e, key)}
+                                    className="mr-[3px] md:mr-0 text-right"
+                                  />
+                                </div>
+                              </div>
+                              <div className="h-px mt-[3px] bg-gray-100_01 rounded-[1px]" />
+                            </div>
+                          )
+                      )}
+                      <div className="flex justify-between mt-1 gap-5">
+                        <p className="self-end !text-gray-700">Vacancy Loss:</p>
+                        <p className="self-start text-right">{formatCurrency(expenses.vacancy_loss[view] || 0)}</p>
+                      </div>
+                      <div className="flex justify-between mt-1 gap-5">
+                        <p className="self-end !text-gray-700">Total Expenses:</p>
+                        <p className="self-start text-right">
+                          {formatCurrency(expenses.total_expenses[view] || 0)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
               <input
@@ -553,19 +627,6 @@ export default function PropertyPage() {
                   setNotes(e.target.value);
                 }}
               />
-
-
-              {/* <TextArea
-  shape="round"
-  name="notes"
-  placeholder={`Personal Notes`}
-  className="sm:p-5 text-gray-900 font-semibold"
-  // value={notes}
-  onChange={(e) => {
-    setNotes(e.target.value);
-    console.log(notes); // check if notes is being updated
-  }}
-/> */}
               <GoogleMap showMarker={false} center={currentLocation} zoom={10}
                 markers={markers} className="h-[370px] rounded-[16px]" />
             </div>
@@ -678,11 +739,12 @@ export default function PropertyPage() {
                       Offer Price
                     </Text>
                     <div className="flex justify-end border-blue-500 border border-dashed bg-white-A700 rounded">
-                      <Text as="p" className="self-end text-right">
-                        {
-                          formatCurrency(property?.offerPrice)
-                        }
-                      </Text>
+                      <input
+                        type="text"
+                        value={formatCurrency(offerPrice)}
+                        onChange={handleOfferPriceChange}
+                        className="self-end text-right p-1 outline-none bg-transparent"
+                      />
                     </div>
                   </div>
                   <div className="self-stretch h-px mt-4 bg-gray-100_01 rounded-[1px]" />
@@ -736,9 +798,12 @@ export default function PropertyPage() {
                     <Text size="md" as="p" className="!text-gray-700">
                       Units:
                     </Text>
-                    <Text size="md" as="p" className="!text-black-900 text-right">
-                      {property?.unitCount}
-                    </Text>
+                    <input
+                      type="number"
+                      value={unitCount}
+                      onChange={handleUnitCountChange}
+                      className="!text-black-900 text-right p-1 border border-solid border-gray-300 rounded"
+                    />
                   </div>
                   <div className="flex justify-between gap-5">
                     <Text as="p" className="!text-gray-700">
@@ -808,12 +873,14 @@ export default function PropertyPage() {
                       <input
                         type="number"
                         value={cash}
-                        onChange={(e) => setCash(e.target.valueAsNumber)}
+                        onChange={(e) => {
+                          setCash(e.target.valueAsNumber)
+                          setMortgageAmount(property.price * 0.9 - e.target.valueAsNumber)
+                        }}
                         className="self-end mr-[3px] md:mr-0 text-right"
                       />
                     </div>
                   </div>
-
                   <div className="self-stretch mt-1">
                     <div className="flex flex-col gap-1">
                       <div className="h-px bg-gray-100_01 rounded-[1px]" />
@@ -834,44 +901,6 @@ export default function PropertyPage() {
                       </div>
                     </div>
                   </div>
-                  {/* <div className="flex self-stretch justify-between items-center mt-1 gap-5">
-                    <Text size="md" as="p" className="!text-gray-700">
-                      Cash Used:
-                    </Text>
-                    <div className="flex justify-end border-blue-500 border border-dashed bg-white-A700 rounded">
-                      <Text as="p" className="self-end mr-[3px] md:mr-0 text-right">
-                      {new Intl.NumberFormat('en-US', {
-          style: 'currency',
-          currency: 'USD',
-          minimumFractionDigits: 0,
-        }).format(
-          (property?.cash || 0) 
-        )}
-                      </Text>
-                    </div>
-                  </div>
-                  <div className="self-stretch mt-1">
-                    <div className="flex flex-col gap-1">
-                      <div className="h-px bg-gray-100_01 rounded-[1px]" />
-                      <div className="flex justify-between items-center gap-5">
-                        <Text size="md" as="p" className="!text-gray-700">
-                          % Down:
-                        </Text>
-                        <Text
-                          as="p"
-                          className="flex justify-end items-end h-[26px] pl-[35px] pr-1 py-px sm:pl-5 text-right bg-white-A700 rounded"
-                        >
-                          {new Intl.NumberFormat('en-US', {
-          style: 'percent',
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        }).format(
-          (property?.percentageDown || 0) 
-        )}
-                        </Text>
-                      </div>
-                    </div>
-                  </div> */}
                   <div className="self-stretch h-[25px] mt-1 bg-white-A700 rounded" />
                   <Button
                     color="blue_500"
@@ -896,7 +925,9 @@ export default function PropertyPage() {
               </div>
             </div>
           </div>
-        </div>
+   
+
+      </div>
         <footer className="p-4 bg-blue-500">
           <div className="flex md:flex-col justify-between items-center w-full mt-[18px] gap-5 mx-auto max-w-[1371px]">
             <Text as="p" className="mt-1 !text-white-A700 tracking-[0.32px]">
